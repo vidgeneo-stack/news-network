@@ -1,4 +1,4 @@
-from groq import Groq
+import google.generativeai as genai
 from ..config import settings
 import logging
 import re
@@ -7,13 +7,12 @@ logger = logging.getLogger(__name__)
 
 class AIProcessor:
     def __init__(self):
-        self.client = Groq(api_key=settings.GROQ_API_KEY)
+        genai.configure(api_key=settings.GROQ_API_KEY)
+        self.model = genai.GenerativeModel(settings.GROQ_MODEL)
 
     def rewrite_for_telegram(self, title: str, content: str) -> str:
-        """ИИ делает качественный рерайт с примером и самопроверкой"""
-        
         prompt = f"""
-Ты — профессиональный новостной редактор Telegram-канала. Сделай РЕРАЙТ новости.
+Ты — профессиональный новостной редактор Telegram-канала. Сделай качественный РЕРАЙТ новости.
 
 ПРИМЕР РЕРАЙТА:
 Оригинал: "Президент России Владимир Путин провел встречу с министрами правительства. На совещании обсуждались вопросы экономического развития страны. По словам пресс-секретаря, встреча длилась три часа."
@@ -23,93 +22,39 @@ class AIProcessor:
 1. ПЕРЕФРАЗИРУЙ своими словами. Не копируй оригинальные фразы!
 2. Напиши 2-4 предложения, передающие ГЛАВНУЮ СУТЬ новости.
 3. ПРИНЦИП ПЕРЕВЕРНУТОЙ ПИРАМИДЫ: первое предложение — самое важное.
-4. Короткие предложения (10-15 слов). Telegram не любит длинные!
-5. ЗАПРЕЩЕНЫ клише: "по словам", "как сообщает", "отмечается", "сообщает источник"
-6. НЕЙТРАЛЬНЫЙ стиль, без эмоций и оценок.
+4. Короткие предложения (10-15 слов).
+5. ЗАПРЕЩЕНЫ клише: "по словам", "как сообщает", "отмечается"
+6. НЕЙТРАЛЬНЫЙ стиль.
 7. Сохрани ВСЕ ключевые факты: имена, даты, цифры, места.
 8. ТЕКСТ ДОЛЖЕН БЫТЬ ЗАВЕРШЁННЫМ — последнее предложение заканчивается точкой!
 9. Не обрывай текст на полуслове!
 
-САМОПРОВЕРКА перед отправкой:
-- Все ли предложения закончены? (нет обрывов)
-- Есть ли пробелы после точек и запятых?
-- Нет ли скопированных фраз из оригинала?
-- Понятен ли текст без чтения оригинала?
-
 Заголовок: {title}
 Оригинал: {content[:2000]}
 
-Напиши ТОЛЬКО готовый рерайт (без кавычек, пояснений и слова "источник"):
+Напиши ТОЛЬКО готовый рерайт (без кавычек и пояснений):
 """
         
         try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.GROQ_MODEL,
-                temperature=0.75,
-                max_tokens=2000,  # Большой лимит, пусть ИИ сам решит
-                presence_penalty=0.5,
-                frequency_penalty=0.3
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=800,
+                )
             )
             
-            rewritten = chat_completion.choices[0].message.content.strip()
-            
-            # Самопроверка: если текст слишком похож на оригинал, перегенерируем
-            if self._is_too_similar(rewritten, content):
-                logger.warning("Текст слишком похож на оригинал, перегенерируем...")
-                return self._force_rewrite(title, content)
-            
-            # Безопасная очистка
+            rewritten = response.text.strip()
             rewritten = self._safe_fix_spacing(rewritten)
             rewritten = self._ensure_complete_sentence(rewritten)
             
             return rewritten
             
         except Exception as e:
-            logger.error(f"AI ошибка: {e}")
+            logger.error(f"Gemini ошибка: {e}")
             return self._safe_fix_spacing(content[:400]) if content else ""
     
-    def _force_rewrite(self, title: str, content: str) -> str:
-        """Принудительный рерайт с ещё более жёсткими требованиями"""
-        prompt = f"""
-СДЕЛАЙ РЕРАЙТ этого текста. НЕ КОПИРУЙ оригинальные предложения!
-
-ПРИМЕР:
-Оригинал: "Министр иностранных дел России Сергей Лавров заявил о готовности к переговорам."
-Рерайт: "Глава российской дипломатии выразил готовность вести диалог."
-
-Заголовок: {title}
-Текст: {content[:1500]}
-
-Напиши 3 коротких предложения своими словами. ТЕКСТ ДОЛЖЕН БЫТЬ ЗАВЕРШЁННЫМ:
-"""
-        try:
-            chat_completion = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.GROQ_MODEL,
-                temperature=0.85,
-                max_tokens=1500,
-                presence_penalty=0.7
-            )
-            return self._safe_fix_spacing(chat_completion.choices[0].message.content.strip())
-        except:
-            return self._safe_fix_spacing(content[:400])
-    
-    def _is_too_similar(self, rewritten: str, original: str) -> bool:
-        """Проверяет, не скопировал ли ИИ текст"""
-        if not rewritten or not original:
-            return False
-        
-        short_rewritten = rewritten[:150].lower()
-        short_original = original[:150].lower()
-        
-        common_chars = sum(1 for a, b in zip(short_rewritten, short_original) if a == b)
-        similarity = common_chars / max(len(short_rewritten), len(short_original))
-        
-        return similarity > 0.6
-    
     def _safe_fix_spacing(self, text: str) -> str:
-        """БЕЗОПАСНО чинит только стыки слов"""
         text = re.sub(r'([.!?])([А-Яа-яA-Za-z])', r'\1 \2', text)
         text = re.sub(r'([,;:])([А-Яа-яA-Za-z])', r'\1 \2', text)
         text = re.sub(r'([а-яё])([A-ZА-ЯЁ])', r'\1 \2', text)
@@ -120,10 +65,8 @@ class AIProcessor:
         return text.strip()
     
     def _ensure_complete_sentence(self, text: str) -> str:
-        """Гарантирует завершённость текста"""
         if not text:
             return text
-        
         if not text[-1] in '.!?…':
             words = text.split()
             if len(words) > 1:
@@ -131,5 +74,4 @@ class AIProcessor:
                     text = ' '.join(words[:-1]) + '...'
                 else:
                     text = text.rstrip('.,!?') + '...'
-                    
         return text
