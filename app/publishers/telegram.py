@@ -1,7 +1,7 @@
 import httpx
 import html
-from ..config import settings
 import logging
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +11,8 @@ class TelegramPublisher:
         self.channel = settings.TELEGRAM_CHANNEL
         self.base_url = f"https://api.telegram.org/bot{self.token}"
 
-        def publish_news(self, title: str, ai_text: str, source_url: str, image_url: str = None) -> bool:
-        """Публикует новость со встроенной в текст ссылкой"""
+    def publish_news(self, title: str, ai_text: str, source_url: str, image_url: str = None) -> bool:
+        """Публикует новость, встраивая ссылку в одно из первых слов текста"""
         
         safe_title = html.escape(title)
         safe_url = html.escape(source_url)
@@ -20,29 +20,29 @@ class TelegramPublisher:
         # Разбиваем текст на слова
         words = ai_text.split()
         
-        # Встраиваем ссылку в последнее слово (или предпоследнее, если последнее - это частица/союз)
-        if len(words) >= 2 and safe_url and safe_url != "#":
-            # Берем последнее значимое слово (не предлог/союз)
-            last_word = words[-1].rstrip('.,!?-;:')
-            if len(last_word) > 2:  # Если слово достаточно длинное
-                # Встраиваем ссылку в последнее слово
-                words[-1] = f'<a href="{safe_url}">{last_word}</a>'
-                final_text = ' '.join(words)
-            else:
-                # Если последнее слово слишком короткое, берем предпоследнее
-                if len(words) >= 3:
-                    words[-2] = f'<a href="{safe_url}">{words[-2].rstrip(".,!?-;:")}</a>'
-                    final_text = ' '.join(words)
-                else:
-                    final_text = ai_text + f' <a href="{safe_url}">источник</a>'
-        else:
-            final_text = ai_text
+        # Ищем подходящее слово для встраивания ссылки (3-е или 4-е слово, длина > 3 букв)
+        link_inserted = False
+        if safe_url and safe_url != "#" and len(words) > 4:
+            # Пробуем вставить в 3-е или 4-е слово (обычно там глагол или важное существительное)
+            for i in [2, 3, 4]:
+                if i < len(words):
+                    word = words[i].strip('.,!?-;:')
+                    if len(word) > 3:  # Если слово достаточно длинное
+                        words[i] = f'<a href="{safe_url}">{word}</a>'
+                        link_inserted = True
+                        break
+        
+        # Если не удалось вставить в начало, добавляем в конец
+        if not link_inserted and safe_url and safe_url != "#":
+            words.append(f'<a href="{safe_url}">источник</a>')
+        
+        final_text = ' '.join(words)
         
         # Формируем пост: жирный заголовок + текст со встроенной ссылкой
-        caption = f"<b> {safe_title}</b>\n\n{final_text}"
+        caption = f"<b>📰 {safe_title}</b>\n\n{final_text}"
         
         payload = {
-            "chat_id": settings.TELEGRAM_CHANNEL,
+            "chat_id": self.channel,
             "parse_mode": "HTML",
             "disable_web_page_preview": True  # Убираем дублирующее превью
         }
