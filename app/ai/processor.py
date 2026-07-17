@@ -10,132 +10,145 @@ class AIProcessor:
         self.client = Groq(api_key=settings.GROQ_API_KEY)
 
     def rewrite_for_telegram(self, title: str, content: str) -> str:
-        """AI делает НАСТОЯЩИЙ рерайт с примером"""
+        """ИИ делает профессиональный рерайт с самопроверкой"""
         
-        # Определяем длину
         content_length = len(content)
         if content_length < 500:
             max_tokens = 500
-            target_sentences = "2-3"
+            sentences = "2-3"
         elif content_length < 1500:
-            max_tokens = 800
-            target_sentences = "3-4"
+            max_tokens = 700
+            sentences = "3-4"
         else:
-            max_tokens = 1000
-            target_sentences = "4-5"
+            max_tokens = 900
+            sentences = "4-5"
         
         prompt = f"""
-Ты — профессиональный журналист. СДЕЛАЙ НАСТОЯЩИЙ РЕРАЙТ новости, отредактируй как профессионал. 
+Ты — профессиональный новостной редактор Telegram-канала. Сделай РЕРАЙТ новости.
 
 ПРИМЕР РЕРАЙТА:
-Оригинал: "Президент России Владимир Путин провел встречу с министрами. На совещании обсуждались вопросы экономики."
-Рерайт: "Глава государства встретился с членами правительства. Главной темой переговоров стали экономические вопросы."
+Оригинал: "Президент России Владимир Путин провел встречу с министрами правительства. На совещании обсуждались вопросы экономического развития страны. По словам пресс-секретаря, встреча длилась три часа."
+Рерайт: "Глава государства встретился с членами кабинета министров. Главной темой переговоров стала экономика. Переговоры продолжались три часа."
 
-ТВОЯ ЗАДАЧА:
-1. ПЕРЕФРАЗИРУЙ каждое предложение своими словами!
-2. Напиши {target_sentences} предложения
-3. ОБЯЗАТЕЛЬНО ставь пробелы после точек, запятых, скобок
-4. Не копируй фразы из оригинала!
-5. ЗАВЕРШИ текст полноценным предложением!
-6. Закончи мысль полностью логически! 
-7. Проведи проверку на ошибки в грамматике и пунктуации! 
+ПРАВИЛА:
+1. ПЕРЕФРАЗИРУЙ своими словами. Не копируй оригинальные фразы!
+2. Напиши {sentences} предложения.
+3. ПРИНЦИП ПЕРЕВЕРНУТОЙ ПИРАМИДЫ: первое предложение — самое важное.
+4. Короткие предложения (10-15 слов). Telegram не любит длинные!
+5. ЗАПРЕЩЕНЫ клише: "по словам", "как сообщает", "отмечается", "сообщает источник"
+6. НЕЙТРАЛЬНЫЙ стиль, без эмоций и оценок.
+7. Сохрани ВСЕ ключевые факты: имена, даты, цифры, места.
+
+САМОПРОВЕРКА перед отправкой:
+- Все ли предложения закончены? (нет обрывов)
+- Есть ли пробелы после точек и запятых?
+- Нет ли скопированных фраз из оригинала?
+- Понятен ли текст без чтения оригинала?
 
 Заголовок: {title}
 Оригинал: {content[:1500]}
 
-Напиши ТОЛЬКО рерайт (без кавычек):
+Напиши ТОЛЬКО готовый рерайт (без кавычек, пояснений и слова "источник"):
 """
         
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=settings.GROQ_MODEL,
-                temperature=0.9,  # Максимум креативности
+                temperature=0.75,
                 max_tokens=max_tokens,
-                presence_penalty=0.6,  # Штраф за копирование
-                frequency_penalty=0.3
+                presence_penalty=0.5,  # Штраф за копирование
+                frequency_penalty=0.3  # Разнообразие слов
             )
             
             rewritten = chat_completion.choices[0].message.content.strip()
             
-            # Проверяем, не скопировал ли AI текст
+            # Самопроверка: если текст слишком похож на оригинал, перегенерируем
             if self._is_too_similar(rewritten, content):
-                logger.warning("AI скопировал текст, перегенерируем...")
+                logger.warning("Текст слишком похож на оригинал, перегенерируем...")
                 return self._force_rewrite(title, content, max_tokens)
             
-            # Агрессивная очистка
-            rewritten = self._fix_all_spacing(rewritten)
+            # Безопасная очистка
+            rewritten = self._safe_fix_spacing(rewritten)
             rewritten = self._ensure_complete_sentence(rewritten)
             
             return rewritten
             
         except Exception as e:
             logger.error(f"AI ошибка: {e}")
-            return self._fix_all_spacing(content[:500]) if content else ""
+            return self._safe_fix_spacing(content[:400]) if content else ""
     
     def _force_rewrite(self, title: str, content: str, max_tokens: int) -> str:
-        """Принудительный рерайт с ещё более жёстким промптом"""
+        """Принудительный рерайт с ещё более жёсткими требованиями"""
         prompt = f"""
-ПЕРЕФРАЗИРУЙ этот текст ПОЛНОСТЬЮ своими словами. Не используй оригинальные фразы!
+СДЕЛАЙ РЕРАЙТ этого текста. НЕ КОПИРУЙ оригинальные предложения!
+
+ПРИМЕР:
+Оригинал: "Министр иностранных дел России Сергей Лавров заявил о готовности к переговорам."
+Рерайт: "Глава российской дипломатии выразил готовность вести диалог."
 
 Заголовок: {title}
 Текст: {content[:1000]}
 
-Напиши 3 предложения своими словами:
+Напиши {3 if len(content) < 1000 else 4} коротких предложения своими словами:
 """
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=settings.GROQ_MODEL,
-                temperature=1.0,
+                temperature=0.85,
                 max_tokens=max_tokens,
-                presence_penalty=0.8
+                presence_penalty=0.7
             )
-            return self._fix_all_spacing(chat_completion.choices[0].message.content.strip())
+            return self._safe_fix_spacing(chat_completion.choices[0].message.content.strip())
         except:
-            return self._fix_all_spacing(content[:500])
+            return self._safe_fix_spacing(content[:400])
     
     def _is_too_similar(self, rewritten: str, original: str) -> bool:
-        """Проверяет, не скопировал ли AI текст"""
+        """Проверяет, не скопировал ли ИИ текст"""
         if not rewritten or not original:
             return False
         
-        # Берём первые 100 символов
-        short_rewritten = rewritten[:100].lower()
-        short_original = original[:100].lower()
+        # Берём первые 150 символов
+        short_rewritten = rewritten[:150].lower()
+        short_original = original[:150].lower()
         
-        # Если совпадает больше 70% - это копипаст
+        # Считаем совпадения
         common_chars = sum(1 for a, b in zip(short_rewritten, short_original) if a == b)
         similarity = common_chars / max(len(short_rewritten), len(short_original))
         
-        return similarity > 0.7
+        # Если совпадает больше 60% — это копипаст
+        return similarity > 0.6
     
-    def _fix_all_spacing(self, text: str) -> str:
-        """Мощная очистка пробелов"""
-        # Пробел после точек, восклицательных, вопросительных знаков
+    def _safe_fix_spacing(self, text: str) -> str:
+        """БЕЗОПАСНО чинит только стыки слов"""
+        # Пробел после точек, восклицательных и вопросительных знаков
         text = re.sub(r'([.!?])([А-Яа-яA-Za-z])', r'\1 \2', text)
-        # Пробел после запятых, двоеточий, точек с запятой
+        # Пробел после запятых, двоеточий и точек с запятой
         text = re.sub(r'([,;:])([А-Яа-яA-Za-z])', r'\1 \2', text)
-        # Пробел перед открывающей скобкой
+        # Пробел между строчной кириллицей и заглавной буквой
+        text = re.sub(r'([а-яё])([A-ZА-ЯЁ])', r'\1 \2', text)
+        # Пробел между строчной латиницей и заглавной кириллицей
+        text = re.sub(r'([a-z])([А-Я])', r'\1 \2', text)
+        # Пробелы вокруг скобок
         text = re.sub(r'([А-Яа-яA-Za-z])\(', r'\1 (', text)
-        # Пробел после закрывающей скобки
         text = re.sub(r'\)([А-Яа-яA-Za-z])', r') \1', text)
-        # Пробел между латиницей и кириллицей
-        text = re.sub(r'([a-zA-Z])([А-Яа-я])', r'\1 \2', text)
-        text = re.sub(r'([А-Яа-я])([a-zA-Z])', r'\1 \2', text)
-        # Исправляем прилипшие предлоги (о, об, в, на, с, по, из, за, под, над, от, до, к)
-        text = re.sub(r'([а-яё])(о|об|в|на|с|по|из|за|под|над|от|до|к)([А-Яа-я])', r'\1 \2 \3', text, flags=re.IGNORECASE)
-        # Убираем двойные пробелы
+        # Удаляем двойные пробелы
         text = re.sub(r'\s+', ' ', text)
+        
         return text.strip()
     
     def _ensure_complete_sentence(self, text: str) -> str:
-        """Проверяет завершённость текста"""
-        if text and not text[-1] in '.!?…':
-            last_word = text.split()[-1] if text.split() else ""
-            if len(last_word) < 4:
-                words = text.split()[:-1]
-                text = ' '.join(words) + '...'
-            else:
-                text = text.rstrip('.,!?') + '...'
+        """Гарантирует завершённость текста"""
+        if not text:
+            return text
+        
+        if not text[-1] in '.!?…':
+            words = text.split()
+            if len(words) > 1:
+                if len(words[-1]) <= 2:
+                    text = ' '.join(words[:-1]) + '...'
+                else:
+                    text = text.rstrip('.,!?') + '...'
+                    
         return text
