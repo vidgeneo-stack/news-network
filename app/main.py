@@ -20,11 +20,15 @@ def root():
     return {"status": "ok", "message": "News Network API работает! 🚀"}
 
 @app.post("/trigger-parse/")
-async def trigger_parse(db: Session = Depends(get_db)):
+async def trigger_parse():
     """Ручной запуск парсинга и публикации (для тестов)"""
     try:
-        redis = await create_pool(host=settings.REDIS_URL.replace("redis://", ""))
-        await redis.enqueue_job("parse_and_publish_job")
+        from arq import create_pool
+        from arq.connections import RedisSettings
+        
+        # Создаем пул правильно
+        pool = await create_pool(RedisSettings(host='redis', port=6379))
+        await pool.enqueue_job("parse_and_publish_job")
         return {"status": "success", "message": "Задача добавлена в очередь. Проверь логи воркера."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
