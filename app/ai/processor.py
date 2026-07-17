@@ -10,65 +10,82 @@ class AIProcessor:
         self.client = Groq(api_key=settings.GROQ_API_KEY)
 
     def rewrite_for_telegram(self, title: str, content: str) -> str:
-        """AI делает настоящий рерайт + определяет оптимальную длину"""
+        """AI делает настоящий рерайт с умной длиной"""
         
         # Определяем длину на основе исходного текста
         content_length = len(content)
         if content_length < 500:
-            max_tokens = 200  # Короткие новости
-            target_sentences = 2
+            max_tokens = 400
+            target_sentences = "2-3"
         elif content_length < 1500:
-            max_tokens = 400  # Средние новости
-            target_sentences = 3
+            max_tokens = 700
+            target_sentences = "3-4"
         else:
-            max_tokens = 600  # Длинные новости
-            target_sentences = 4
+            max_tokens = 1000  # Увеличили до 1000!
+            target_sentences = "4-5"
         
         prompt = f"""
-Ты — профессиональный журналист и редактор новостного Telegram-канала.
+Ты — профессиональный журналист. Твоя задача — сделать НАСТОЯЩИЙ РЕРАЙТ новости для Telegram-канала.
 
-ТВОЯ ЗАДАЧА:
-1. СДЕЛАЙ НАСТОЯЩИЙ РЕРАЙТ (перефразируй своими словами, не копируй предложения дословно!)
-2. Напиши цепляющий анонс новости на {target_sentences}-{target_sentences+1} предложения
-3. Текст должен быть:
-   - Живым, грамотным, легко читаемым
-   - С ОБЯЗАТЕЛЬНЫМИ пробелами после точек, запятых и слов
-   - Без HTML-тегов, markdown, звёздочек и подчёркиваний
-   - Без ссылок, хэштегов и слов "источник", "читать далее"
-4. Передай СУТЬ новости, сохранив главные факты
-5. Если текст пустой — сделай рерайт только на основе заголовка
+ПРАВИЛА:
+1. ПЕРЕФРАЗИРУЙ своими словами! Не копируй предложения из оригинала!
+2. Напиши {target_sentences} предложения
+3. ОБЯЗАТЕЛЬНО ставь пробелы после КАЖДОЙ точки, запятой, восклицательного знака
+4. Не используй HTML-теги, markdown, звёздочки
+5. Не добавляй ссылки, хэштеги, слова "источник" или "читать далее"
+6. Передай главные факты новости
+7. ЗАВЕРШИ текст полноценным предложением (не обрывай на полуслове!)
 
 Заголовок: {title}
-Исходный текст: {content[:1500]}
+Оригинальный текст: {content[:1500]}
 
-Верни ТОЛЬКО готовый текст анонса (без кавычек, без пояснений).
+Напиши ТОЛЬКО готовый текст анонса (без кавычек и пояснений):
 """
         
         try:
             chat_completion = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model=settings.GROQ_MODEL,
-                temperature=0.8,  # Больше креативности для рерайта
+                temperature=0.85,  # Больше креативности
                 max_tokens=max_tokens
             )
             
             rewritten = chat_completion.choices[0].message.content.strip()
             
-            # Пост-обработка: гарантируем пробелы
-            rewritten = self._fix_spacing(rewritten)
+            # Агрессивная пост-обработка
+            rewritten = self._fix_all_spacing(rewritten)
+            rewritten = self._ensure_complete_sentence(rewritten)
             
             return rewritten
             
         except Exception as e:
             logger.error(f"AI ошибка: {e}")
-            # Фолбэк: просто чистим текст
-            return self._fix_spacing(content[:300]) if content else ""
+            return self._fix_all_spacing(content[:500]) if content else ""
     
-    def _fix_spacing(self, text: str) -> str:
-        """Исправляет отсутствующие пробелы"""
-        # Добавляем пробелы после точек, запятых, если их нет
-        text = re.sub(r'([.!?])([А-Яа-яA-Za-z])', r'\1 \2', text)
+    def _fix_all_spacing(self, text: str) -> str:
+        """Агрессивно исправляет все проблемы с пробелами"""
+        # Добавляем пробел после точек, если следующий символ - буква
+        text = re.sub(r'([.!?])([А-Яа-яA-Za-zА-Я])', r'\1 \2', text)
+        # Добавляем пробел после запятых, точек с запятой, двоеточий
         text = re.sub(r'([,;:])([А-Яа-яA-Za-z])', r'\1 \2', text)
+        # Исправляем слипшиеся слова (если между двумя словами нет пробела)
+        text = re.sub(r'([а-яё])([А-ЯЁ])', r'\1 \2', text)  # Конец предложения + новое
+        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)  # Для английских слов
         # Убираем двойные пробелы
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
+    
+    def _ensure_complete_sentence(self, text: str) -> str:
+        """Проверяет, что текст не обрывается на полуслове"""
+        # Если текст заканчивается не на точку/восклицательный/вопросительный знак
+        if text and not text[-1] in '.!?…':
+            # Если последнее слово короткое (меньше 3 букв), возможно это обрыв
+            last_word = text.split()[-1] if text.split() else ""
+            if len(last_word) < 3:
+                # Удаляем последнее слово и добавляем многоточие
+                words = text.split()[:-1]
+                text = ' '.join(words) + '...'
+            else:
+                # Добавляем многоточие
+                text = text.rstrip('.,!?') + '...'
+        return text
