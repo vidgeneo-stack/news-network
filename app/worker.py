@@ -21,39 +21,44 @@ async def parse_and_publish_job(ctx):
     publisher = TelegramPublisher()
     
     try:
-        # Берем только активные RSS источники
-        sources = db.query(Source).filter(Source.source_type == SourceType.RSS, Source.is_active == True).all()
+        sources = db.query(Source).filter(Source.source_type == SourceType.RSS).all()
         
         for source in sources:
             logger.info(f"Парсим источник: {source.name}")
             raw_news = parser.parse_feed(source.url, limit=5)
             
             for item in raw_news:
-                # Проверяем дубликаты по URL
-                exists = db.query(News).filter(News.source_url == item['link']).first()
+                # ЗАЩИТА: ищем ссылку в разных возможных ключах
+                item_url = item.get('link') or item.get('url') or item.get('href', 'unknown_url')
+                item_title = item.get('title', 'Без заголовка')
+                item_content = item.get('content', item.get('description', ''))
+                item_image = item.get('image_url')
+                
+                # Проверяем дубликаты
+                exists = db.query(News).filter(News.source_url == item_url).first()
                 if exists:
                     continue
                 
-                # 1. Сначала получаем рерайт и город от ИИ
-                ai_result = ai.rewrite_for_telegram(item['title'], item.get('content', ''))
+                # 1. Получаем рерайт и город от ИИ
+                ai_result = ai.rewrite_for_telegram(item_title, item_content)
                 ai_text = ai_result["text"]
                 city = ai_result["city"]
                 
-                # 2. Создаем запись в БД со статусом черновика
+                # 2. Создаем запись в БД
                 news = News(
-                    title=item['title'],
+                    title=item_title,
                     content=ai_text,
-                    source_url=item['link'],
+                    source_url=item_url,
                     source_name=source.name,
                     city=city,
-                    image_url=item.get('image_url'), # Если парсер возвращает картинку
-                    status="draft" # Статус для модерации
+                    image_url=item_image,
+                    status="draft"
                 )
                 db.add(news)
                 db.commit()
                 db.refresh(news)
                 
-                # 3. Отправляем черновик в группу модерации с кнопками
+                # 3. Отправляем на модерацию
                 success = publisher.send_for_moderation(
                     news_id=news.id,
                     title=news.title,
