@@ -1,26 +1,27 @@
-import httpx
+from openai import OpenAI
+from ..config import settings
 import logging
 import re
-from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 class AIProcessor:
     def __init__(self):
-        self.api_key = settings.AI_API_KEY
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=settings.AI_API_KEY
+        )
         self.model = settings.AI_MODEL
-        self.proxy = settings.PROXY_URL
 
-    def rewrite_for_telegram(self, title: str, content: str) -> str:
-        # Используем XML-теги, чтобы ИИ не путал инструкцию с исходным текстом
+    def rewrite_for_telegram(self, title: str, content: str) -> str | None:
         prompt = f"""<task>
 Ты — профессиональный новостной редактор Telegram-канала. Сделай качественный, компактный рерайт новости своими словами.
 </task>
 
 <rules>
-1. Напиши связный, грамотный текст, передающий главную суть. Объем не ограничен, пиши столько, сколько нужно для полноты.
+1. Напиши связный, грамотный текст, передающий главную суть.
 2. Начинай текст строго с ЗАГЛАВНОЙ буквы.
-3. Текст должен быть ПОЛНОСТЬЮ завершенным. Последнее предложение должно заканчиваться СТРОГО ТОЧКОЙ. 
+3. Текст должен быть ПОЛНОСТЬЮ завершенным. Последнее предложение должно заканчиваться СТРОГО ТОЧКОЙ.
 4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать многоточие (...) или обрывать мысль на полуслове.
 5. Запрещены клише: "по словам", "как сообщает", "отмечается", "по данным".
 6. Сохрани ключевые факты: имена, цифры, названия мест.
@@ -34,29 +35,23 @@ class AIProcessor:
 Напиши ТОЛЬКО итоговый текст рерайта. Без вступлений, без пояснений, без кавычек.
 """
         
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.6, "maxOutputTokens": 800} # Чуть снизили temperature для большей строгости
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        
         try:
-            with httpx.Client(proxy=self.proxy, timeout=30.0) as client:
-                response = client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                
-                rewritten = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                rewritten = self._safe_fix_spacing(rewritten)
-                rewritten = self._ensure_complete_sentence(rewritten)
-                return rewritten
-                
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.6,
+                max_tokens=800,
+                extra_body={"reasoning": {"enabled": True}}  # Твой параметр из скрипта
+            )
+            
+            rewritten = response.choices[0].message.content.strip()
+            rewritten = self._safe_fix_spacing(rewritten)
+            rewritten = self._ensure_complete_sentence(rewritten)
+            return rewritten
+            
         except Exception as e:
-            logger.error(f"Gemini HTTP ошибка через прокси: {e}")
-            return f"[Ошибка ИИ: не удалось сгенерировать текст]"
+            logger.error(f"OpenRouter ошибка: {e}")
+            return None
     
     def _safe_fix_spacing(self, text: str) -> str:
         text = re.sub(r'([.!?])([А-Яа-яA-Za-z])', r'\1 \2', text)
