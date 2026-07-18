@@ -32,14 +32,14 @@ async def parse_and_publish_job(ctx):
                 if exists:
                     continue
                 
+                
                 news = News(
                     title=item['title'],
-                    content=item['content'],
-                    source_url=item['source_url'],
-                    image_url=item['image_url'],
-                    city_id=source.city_id,
-                    source_id=source.id,
-                    status="draft"
+                    content=rewritten_text,
+                    source_url=item['link'],
+                    source_name=source_name,
+                    city=city,  # <-- ДОБАВЛЕНО
+                    status="pending"
                 )
                 db.add(news)
                 db.commit()
