@@ -1,22 +1,15 @@
-from openai import OpenAI
-from ..config import settings
+import httpx
 import logging
 import re
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
 class AIProcessor:
     def __init__(self):
-        self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.AI_API_KEY,
-            # ОБЯЗАТЕЛЬНЫЕ заголовки для OpenRouter, чтобы не было 403
-            default_headers={
-                "HTTP-Referer": "https://github.com/vidgeneo-stack/news-network",
-                "X-Title": "News Network Bot",
-            }
-        )
+        self.api_key = settings.AI_API_KEY
         self.model = settings.AI_MODEL
+        self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def rewrite_for_telegram(self, title: str, content: str) -> str:
         prompt = f"""<task>
@@ -40,23 +33,41 @@ class AIProcessor:
 Напиши ТОЛЬКО итоговый текст рерайта. Без вступлений, без пояснений, без кавычек.
 """
         
+        # Формируем запрос ТОЧНО как в официальном скрипте OpenRouter
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            "reasoning": {"enabled": True}
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/vidgeneo-stack/news-network",
+            "X-Title": "News Network Bot"
+        }
+        
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.6,
-                max_tokens=800,
-                extra_body={"reasoning": {"enabled": True}}
-            )
-            
-            rewritten = response.choices[0].message.content.strip()
-            rewritten = self._safe_fix_spacing(rewritten)
-            rewritten = self._ensure_complete_sentence(rewritten)
-            return rewritten
-            
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(self.url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                # Извлекаем ответ точно как в их скрипте: response['choices'][0]['message']
+                message = data['choices'][0]['message']
+                rewritten = message.get('content', '').strip()
+                
+                rewritten = self._safe_fix_spacing(rewritten)
+                rewritten = self._ensure_complete_sentence(rewritten)
+                return rewritten
+                
         except Exception as e:
             logger.error(f"OpenRouter ошибка: {e}")
-            # Возвращаем безопасную строку вместо None, чтобы воркер не падал
             return "Не удалось сгенерировать рерайт для этой новости."
     
     def _safe_fix_spacing(self, text: str) -> str:
