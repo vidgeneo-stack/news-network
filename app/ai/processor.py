@@ -9,6 +9,7 @@ class AIProcessor:
     def __init__(self):
         self.api_key = settings.AI_API_KEY
         self.model = settings.AI_MODEL
+        self.proxy = settings.PROXY_URL
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def rewrite_for_telegram(self, title: str, content: str) -> str:
@@ -33,15 +34,9 @@ class AIProcessor:
 Напиши ТОЛЬКО итоговый текст рерайта. Без вступлений, без пояснений, без кавычек.
 """
         
-        # Формируем запрос ТОЧНО как в официальном скрипте OpenRouter
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            "messages": [{"role": "user", "content": prompt}],
             "reasoning": {"enabled": True}
         }
         
@@ -53,12 +48,12 @@ class AIProcessor:
         }
         
         try:
-            with httpx.Client(timeout=30.0) as client:
+            # ДОБАВЛЕН ПРОКСИ: если он есть в .env, запрос пойдет через него
+            with httpx.Client(proxy=self.proxy, timeout=30.0) as client:
                 response = client.post(self.url, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
                 
-                # Извлекаем ответ точно как в их скрипте: response['choices'][0]['message']
                 message = data['choices'][0]['message']
                 rewritten = message.get('content', '').strip()
                 
