@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379"
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_CHANNEL: str
+    TELEGRAM_MODERATION_CHAT_ID: str
     AI_API_KEY: str
     AI_MODEL: str = "gemini-1.5-flash"
     PROXY_URL: str | None = None
