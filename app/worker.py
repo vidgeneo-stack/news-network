@@ -21,42 +21,54 @@ async def parse_and_publish_job(ctx):
     publisher = TelegramPublisher()
     
     try:
-        sources = db.query(Source).filter(Source.source_type == SourceType.RSS).all()
+        # Берем только активные RSS источники
+        sources = db.query(Source).filter(Source.source_type == SourceType.RSS, Source.is_active == True).all()
         
         for source in sources:
             logger.info(f"Парсим источник: {source.name}")
             raw_news = parser.parse_feed(source.url, limit=5)
             
             for item in raw_news:
-                exists = db.query(News).filter(News.source_url == item['source_url']).first()
+                # Проверяем дубликаты по URL
+                exists = db.query(News).filter(News.source_url == item['link']).first()
                 if exists:
                     continue
                 
+                # 1. Сначала получаем рерайт и город от ИИ
+                ai_result = ai.rewrite_for_telegram(item['title'], item.get('content', ''))
+                ai_text = ai_result["text"]
+                city = ai_result["city"]
                 
+                # 2. Создаем запись в БД со статусом черновика
                 news = News(
                     title=item['title'],
-                    content=rewritten_text,
+                    content=ai_text,
                     source_url=item['link'],
-                    source_name=source_name,
-                    city=city,  # <-- ДОБАВЛЕНО
-                    status="pending"
+                    source_name=source.name,
+                    city=city,
+                    image_url=item.get('image_url'), # Если парсер возвращает картинку
+                    status="draft" # Статус для модерации
                 )
                 db.add(news)
                 db.commit()
                 db.refresh(news)
                 
-                ai_text = ai.rewrite_for_telegram(news.title, news.content)
-                
-                success = publisher.publish_news(
+                # 3. Отправляем черновик в группу модерации с кнопками
+                success = publisher.send_for_moderation(
+                    news_id=news.id,
                     title=news.title,
-                    ai_text=ai_text,
+                    ai_text=news.content,
                     source_url=news.source_url,
+                    city=news.city,
                     image_url=news.image_url
                 )
                 
-                news.status = "published" if success else "error"
-                db.commit()
-                logger.info(f"✅ Обработано: {news.title[:50]}...")
+                if success:
+                    logger.info(f"✅ Отправлено на модерацию (ID: {news.id}): {news.title[:50]}...")
+                else:
+                    logger.error(f"❌ Ошибка отправки на модерацию (ID: {news.id})")
+                    news.status = "error"
+                    db.commit()
                 
     except Exception as e:
         logger.error(f"Критическая ошибка в воркере: {e}")
@@ -71,5 +83,4 @@ class WorkerSettings:
         cron(parse_and_publish_job, minute=0, second=0),
         cron(parse_and_publish_job, minute=30, second=0)
     ]
-    # ВОТ ЭТО ИСПРАВЛЕНИЕ: явно указываем хост 'redis' вместо localhost
     redis_settings = RedisSettings(host='redis', port=6379)
