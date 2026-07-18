@@ -28,13 +28,12 @@ async def parse_and_publish_job(ctx):
             raw_news = parser.parse_feed(source.url, limit=5)
             
             for item in raw_news:
-                # ЗАЩИТА: ищем ссылку в разных возможных ключах
+                # Безопасное получение данных из парсера
                 item_url = item.get('link') or item.get('url') or item.get('href', 'unknown_url')
                 item_title = item.get('title', 'Без заголовка')
                 item_content = item.get('content', item.get('description', ''))
                 item_image = item.get('image_url')
                 
-                # Проверяем дубликаты
                 exists = db.query(News).filter(News.source_url == item_url).first()
                 if exists:
                     continue
@@ -44,13 +43,12 @@ async def parse_and_publish_job(ctx):
                 ai_text = ai_result["text"]
                 city = ai_result["city"]
                 
-                # 2. Создаем запись в БД
+                # 2. Создаем запись в БД (ИСПРАВЛЕНО: source_id вместо source_name)
                 news = News(
                     title=item_title,
                     content=ai_text,
                     source_url=item_url,
-                    source_name=source.name,
-                    city=city,
+                    source_id=source.id,  # <-- ИСПРАВЛЕНО
                     image_url=item_image,
                     status="draft"
                 )
@@ -58,13 +56,13 @@ async def parse_and_publish_job(ctx):
                 db.commit()
                 db.refresh(news)
                 
-                # 3. Отправляем на модерацию
+                # 3. Отправляем на модерацию (передаем city как текст для сообщения)
                 success = publisher.send_for_moderation(
                     news_id=news.id,
                     title=news.title,
                     ai_text=news.content,
                     source_url=news.source_url,
-                    city=news.city,
+                    city=city,
                     image_url=news.image_url
                 )
                 
