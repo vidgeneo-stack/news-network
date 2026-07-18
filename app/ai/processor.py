@@ -9,11 +9,16 @@ class AIProcessor:
     def __init__(self):
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=settings.AI_API_KEY
+            api_key=settings.AI_API_KEY,
+            # ОБЯЗАТЕЛЬНЫЕ заголовки для OpenRouter, чтобы не было 403
+            default_headers={
+                "HTTP-Referer": "https://github.com/vidgeneo-stack/news-network",
+                "X-Title": "News Network Bot",
+            }
         )
         self.model = settings.AI_MODEL
 
-    def rewrite_for_telegram(self, title: str, content: str) -> str | None:
+    def rewrite_for_telegram(self, title: str, content: str) -> str:
         prompt = f"""<task>
 Ты — профессиональный новостной редактор Telegram-канала. Сделай качественный, компактный рерайт новости своими словами.
 </task>
@@ -41,7 +46,7 @@ class AIProcessor:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.6,
                 max_tokens=800,
-                extra_body={"reasoning": {"enabled": True}}  # Твой параметр из скрипта
+                extra_body={"reasoning": {"enabled": True}}
             )
             
             rewritten = response.choices[0].message.content.strip()
@@ -51,7 +56,8 @@ class AIProcessor:
             
         except Exception as e:
             logger.error(f"OpenRouter ошибка: {e}")
-            return None
+            # Возвращаем безопасную строку вместо None, чтобы воркер не падал
+            return "Не удалось сгенерировать рерайт для этой новости."
     
     def _safe_fix_spacing(self, text: str) -> str:
         text = re.sub(r'([.!?])([А-Яа-яA-Za-z])', r'\1 \2', text)
