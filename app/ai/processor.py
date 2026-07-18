@@ -13,13 +13,12 @@ class AIProcessor:
         self.url = "https://openrouter.ai/api/v1/chat/completions"
 
     def rewrite_for_telegram(self, title: str, content: str) -> dict:
-        # ИСПРАВЛЕНО: Добавлен правильный отступ
         prompt = f"""<task>
 Ты — редактор криминально-новостного Telegram-канала в стиле "живой рассказчик". Сделай компактный рерайт новости.
 </task>
 
 <rules>
-1. СТИЛЬ: Живой, динамичный, с легким криминальным оттенком. Используй короткие рубленые фразы.
+1. СТИЛЬ: Живой, динамичный, с легким криминальным оттенком. Короткие рубленые фразы.
 2. ЭМОДЗИ: В начале поставь ОДИН тематический эмодзи (⚖️, 🚔, 💀, 🌍, 🏥).
 3. КАВЫЧКИ: Строго сохраняй русские кавычки-«ёлочки» (« ») для названий, статей, терминов.
 4. ЗАВЕРШЕННОСТЬ: Последнее предложение заканчивается ТОЧКОЙ. Многоточия запрещены.
@@ -35,12 +34,10 @@ class AIProcessor:
 
 Напиши ТОЛЬКО итоговый текст рерайта с хэштегом в конце. Без вступлений, без пояснений.
 """
-        # ИСПРАВЛЕНО: Удален мусорный комментарий, который был здесь
-        
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "reasoning": {"enabled": True} # Оставил как ты просил
+            "reasoning": {"enabled": True}
         }
         
         headers = {
@@ -59,19 +56,16 @@ class AIProcessor:
                 message = data['choices'][0]['message']
                 rewritten = message.get('content', '').strip()
                 
-                # ИСПРАВЛЕНО: Извлекаем город, чтобы вернуть словарь, как ожидает worker.py
                 city = self._extract_city_from_hashtag(rewritten)
                 
                 rewritten = self._safe_fix_spacing(rewritten)
                 rewritten = self._ensure_complete_sentence(rewritten)
                 
-                # ИСПРАВЛЕНО: Возвращаем словарь, а не строку
                 return {"text": rewritten, "city": city}
                 
         except Exception as e:
             logger.error(f"OpenRouter ошибка: {e}")
-            # ИСПРАВЛЕНО: Возвращаем словарь даже при ошибке, чтобы бот не упал
-            return {"text": "Не удалось сгенерировать рерайт для этой новости.", "city": "Федеральные"}
+            return {"text": "Не удалось сгенерировать рерайт.", "city": "Федеральные"}
 
     def _extract_city_from_hashtag(self, text: str) -> str:
         match = re.search(r'#(\w+)$', text)
@@ -95,15 +89,12 @@ class AIProcessor:
         return text.strip()
     
     def _ensure_complete_sentence(self, text: str) -> str:
-        if not text:
+        if not text: 
             return text
-        if text.endswith('...'):
+        if text.endswith('...'): 
             text = text[:-3] + '.'
         elif not text[-1] in '.!?':
             words = text.split()
             if len(words) > 1:
-                if len(words[-1]) <= 3:
-                    text = ' '.join(words[:-1]) + '.'
-                else:
-                    text = text.rstrip('.,!?') + '.'
+                text = ' '.join(words[:-1]) + '.' if len(words[-1]) <= 3 else text.rstrip('.,!?') + '.'
         return text
