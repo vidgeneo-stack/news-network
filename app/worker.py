@@ -33,7 +33,7 @@ async def parse_and_publish_job(ctx):
             skipped_count = 0
             
             for item in raw_news:
-                item_url = item.get('link') or item.get('url') or item.get('href', 'unknown_url')
+                item_url = item.get('source_url') or item.get('link') or item.get('url') or item.get('href', 'unknown_url')
                 item_title = item.get('title', 'Без заголовка')
                 item_content = item.get('content', item.get('description', ''))
                 item_image = item.get('image_url')
