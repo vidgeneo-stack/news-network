@@ -25,7 +25,7 @@ async def parse_and_publish_job(ctx):
         
         for source in sources:
             logger.info(f"Парсим источник: {source.name}")
-            raw_news = parser.parse_feed(source.url, limit=5)
+            raw_news = parser.parse_feed(source.url, limit=50)
             
             for item in raw_news:
                 # Безопасное получение данных из парсера
