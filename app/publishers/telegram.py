@@ -38,7 +38,7 @@ class TelegramPublisher:
         final_text = ' '.join(words)
         
         # Добавляем город в текст для модератора
-        caption = f"<b>📰 {safe_title}</b>\n\n📍 <b>Город:</b> {safe_city}\n\n{final_text}"
+        caption = f"<b>📰 {safe_title}</b>\n\n{final_text}"
         
         # Формируем Inline-клавиатуру (кнопки под постом)
         keyboard = {
