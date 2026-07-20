@@ -47,11 +47,27 @@ async def handle_publish(callback: types.CallbackQuery):
             
         target_channel = CITY_CHANNELS[news.city]
         
-        await bot.forward_message(
-            chat_id=target_channel,
-            from_chat_id=callback.message.chat.id,
-            message_id=callback.message.message_id
-        )
+        # Получаем текст сообщения
+original_text = callback.message.text or callback.message.caption
+
+# Удаляем хэштег из текста (всё после последнего #)
+import re
+clean_text = re.sub(r'\s*#\w+\s*$', '', original_text).strip()
+
+# Отправляем очищенный текст
+if callback.message.photo:
+    await bot.send_photo(
+        chat_id=target_channel,
+        photo=callback.message.photo[-1].file_id,
+        caption=clean_text,
+        parse_mode="HTML"
+    )
+else:
+    await bot.send_message(
+        chat_id=target_channel,
+        text=clean_text,
+        parse_mode="HTML"
+    )
         
         news.status = "published"
         db.commit()
