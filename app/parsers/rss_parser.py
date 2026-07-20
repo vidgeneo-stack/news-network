@@ -10,7 +10,7 @@ class RSSParser:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-    def parse_feed(self, url: str, limit: int = 10) -> List[Dict]:
+    def parse_feed(self, url: str, limit: int = 100) -> List[Dict]:
         """Парсит RSS ленту и возвращает список новостей"""
         try:
             response = httpx.get(url, headers=self.headers, follow_redirects=True, timeout=15.0)
@@ -23,7 +23,7 @@ class RSSParser:
                 content = entry.get('summary', entry.get('description', ''))
                 
                 # Если текста очень мало, пробуем скачать полную статью
-                link = entry.get('link', '')
+                link = entry.get('link') or entry.get('id') or ''
                 if len(content) < 150 and link:
                     full_text = self._scrape_full_text(link)
                     if full_text:
