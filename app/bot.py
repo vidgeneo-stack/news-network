@@ -27,41 +27,42 @@ async def cmd_start(message: types.Message):
     await message.answer("🤖 Бот модерации новостей запущен и готов к работе.")
 
 @dp.callback_query(F.data.startswith("publish_"))
+@dp.callback_query(F.data.startswith("publish_"))
 async def handle_publish(callback: types.CallbackQuery):
     news_id = int(callback.data.split("_")[1])
     db = SessionLocal()
     
     try:
-        # 1. Находим новость в базе
         news = db.query(News).filter(News.id == news_id).first()
         if not news:
             await callback.answer("❌ Новость не найдена в базе.", show_alert=True)
             return
-
-        # 2. Определяем целевой канал на основе города новости
-        target_channel = CITY_CHANNELS.get(news.city, CITY_CHANNELS["Федеральные"])
+        # Проверяем, есть ли город в словаре маршрутизации
+        if news.city not in CITY_CHANNELS:
+            await callback.answer(
+                f"❌ Канал для города '{news.city}' не настроен. Добавьте его в CITY_CHANNELS.",
+                show_alert=True
+            )
+            return
+            
+        target_channel = CITY_CHANNELS[news.city]
         
-        # 3. Пересылаем сообщение из группы модерации в целевой канал
-        # (Мы пересылаем оригинальное сообщение, чтобы сохранить текст, картинку и форматирование)
         await bot.forward_message(
             chat_id=target_channel,
             from_chat_id=callback.message.chat.id,
             message_id=callback.message.message_id
         )
         
-        # 4. Обновляем статус в базе
         news.status = "published"
         db.commit()
         
-        # 5. Уведомляем модератора и удаляем кнопки (или меняем текст)
         await callback.message.edit_text(
             f"✅ Опубликовано в: {target_channel}\n\n{callback.message.text}",
-            reply_markup=None # Убираем кнопки после публикации
+            reply_markup=None
         )
         await callback.answer("✅ Новость опубликована!")
-        
     except Exception as e:
-        logger.error(f"Ошибка при публикации: {e}")
+        logger.error(f"Ошибка при публикации: {e}") 
         await callback.answer("❌ Ошибка при публикации.", show_alert=True)
     finally:
         db.close()
