@@ -1,4 +1,5 @@
 import logging
+import re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
 from sqlalchemy.orm import Session
@@ -14,19 +15,17 @@ bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
 # 🗺️ КАРТА МАРШРУТИЗАЦИИ: Хэштег/Город -> ID Канала для публикации
-# ЗАМЕНИ эти @каналы на реальные ID твоих каналов (вида -1001234567890)
 CITY_CHANNELS = {
-    "Москва": "@test_moscow_news",       # Или числовой ID канала Москвы
-    "СПб": "@test_spb_news",             # Или числовой ID канала СПб
-    "Санкт-Петербург": "@test_spb_news", # На всякий случай
-    "Федеральные": settings.TELEGRAM_CHANNEL # Твой основной канал по умолчанию
+    "Москва": "@test_moscow_news",
+    "СПб": "@test_spb_news",
+    "Санкт-Петербург": "@test_spb_news",
+    "Федеральные": settings.TELEGRAM_CHANNEL
 }
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer("🤖 Бот модерации новостей запущен и готов к работе.")
 
-@dp.callback_query(F.data.startswith("publish_"))
 @dp.callback_query(F.data.startswith("publish_"))
 async def handle_publish(callback: types.CallbackQuery):
     news_id = int(callback.data.split("_")[1])
@@ -37,6 +36,7 @@ async def handle_publish(callback: types.CallbackQuery):
         if not news:
             await callback.answer("❌ Новость не найдена в базе.", show_alert=True)
             return
+            
         # Проверяем, есть ли город в словаре маршрутизации
         if news.city not in CITY_CHANNELS:
             await callback.answer(
@@ -47,36 +47,36 @@ async def handle_publish(callback: types.CallbackQuery):
             
         target_channel = CITY_CHANNELS[news.city]
         
-        # Получаем текст сообщения
-original_text = callback.message.text or callback.message.caption
+        # Получаем текст сообщения (ОТСТУП ИСПРАВЛЕН)
+        original_text = callback.message.text or callback.message.caption
 
-# Удаляем хэштег из текста (всё после последнего #)
-import re
-clean_text = re.sub(r'\s*#\w+\s*$', '', original_text).strip()
+        # Удаляем хэштег из текста (всё после последнего #) (ОТСТУП ИСПРАВЛЕН)
+        clean_text = re.sub(r'\s*#\w+\s*$', '', original_text).strip()
 
-# Отправляем очищенный текст
-if callback.message.photo:
-    await bot.send_photo(
-        chat_id=target_channel,
-        photo=callback.message.photo[-1].file_id,
-        caption=clean_text,
-        parse_mode="HTML"
-    )
-else:
-    await bot.send_message(
-        chat_id=target_channel,
-        text=clean_text,
-        parse_mode="HTML"
-    )
-        
+        # Отправляем очищенный текст (ОТСТУП ИСПРАВЛЕН)
+        if callback.message.photo:
+            await bot.send_photo(
+                chat_id=target_channel,
+                photo=callback.message.photo[-1].file_id,
+                caption=clean_text,
+                parse_mode="HTML"
+            )
+        else:
+            await bot.send_message(
+                chat_id=target_channel,
+                text=clean_text,
+                parse_mode="HTML"
+            )
+            
         news.status = "published"
         db.commit()
         
         await callback.message.edit_text(
-            f"✅ Опубликовано в: {target_channel}\n\n{callback.message.text}",
+            f"✅ Опубликовано в: {target_channel}\n\n{clean_text}",
             reply_markup=None
         )
         await callback.answer("✅ Новость опубликована!")
+        
     except Exception as e:
         logger.error(f"Ошибка при публикации: {e}") 
         await callback.answer("❌ Ошибка при публикации.", show_alert=True)
@@ -89,13 +89,11 @@ async def handle_delete(callback: types.CallbackQuery):
     db = SessionLocal()
     
     try:
-        # 1. Находим новость и меняем статус
         news = db.query(News).filter(News.id == news_id).first()
         if news:
             news.status = "rejected"
             db.commit()
             
-        # 2. Удаляем сообщение из группы модерации
         await callback.message.delete()
         await callback.answer("❌ Новость удалена.")
         
